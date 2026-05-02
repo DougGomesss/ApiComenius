@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>POC - Orçamentos WhatsApp</title>
+    <script type="module" crossorigin src="/assets/index-C67ohG1s.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-c1R6x8Ta.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <button id="resetAllButton" class="danger-button">Limpar POC</button>
+      </header>
+
+      <main class="layout">
+        <section class="budgets-panel">
+          <div class="panel-header">
+            <h2>Orçamentos</h2>
+            <button id="refreshBudgetsButton">Atualizar</button>
+          </div>
+
+          <div class="budget-search">
+            <input
+              id="budgetSearchInput"
+              type="text"
+              placeholder="Busque pelo nome"
+              autocomplete="off"
+            />
+          </div>
+
+          <div id="budgetsList" class="budgets-list"></div>
+        </section>
+      </main>
+    </div>
+
+  </body>
+</html>
