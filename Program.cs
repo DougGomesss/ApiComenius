@@ -1,22 +1,22 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("poc-front", policy =>
-    {
-        policy
-            .WithOrigins(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173"
-            )
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
+    options.AddPolicy(
+        "poc-front",
+        policy =>
+        {
+            policy
+                .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    );
 });
 
 builder.Services.AddHttpClient();
@@ -28,144 +28,183 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 const string VERIFY_TOKEN = "deposito-poc-123";
-const string DEPOSIT_ADDRESS = "Rua Exemplo, 123 - Bairro - S„o Paulo/SP";
+const string DEPOSIT_ADDRESS = "Rua Exemplo, 123 - Bairro - S√£o Paulo/SP";
 const int MINIMUM_DELIVERY_DAYS = 2;
 
 var conversations = new ConcurrentDictionary<string, ConversationSession>();
 var budgets = new ConcurrentDictionary<Guid, Budget>();
 
-
 // Webhook real da Meta
-app.MapGet("/whatsapp/webhook", (HttpRequest request) =>
-{
-    var mode = request.Query["hub.mode"].ToString();
-    var token = request.Query["hub.verify_token"].ToString();
-    var challenge = request.Query["hub.challenge"].ToString();
-
-    Console.WriteLine("=== GET VERIFICA«√O WEBHOOK ===");
-    Console.WriteLine($"hub.mode: {mode}");
-    Console.WriteLine($"hub.verify_token: {token}");
-    Console.WriteLine($"hub.challenge: {challenge}");
-
-    if (mode == "subscribe" && token == VERIFY_TOKEN)
-        return Results.Text(challenge, "text/plain");
-
-    return Results.Unauthorized();
-});
-
-app.MapPost("/whatsapp/webhook", async (HttpRequest request, IHttpClientFactory httpClientFactory) =>
-{
-    using var reader = new StreamReader(request.Body);
-    var body = await reader.ReadToEndAsync();
-
-    Console.WriteLine("=== POST RECEBIDO DO WHATSAPP ===");
-    Console.WriteLine(body);
-
-    try
+app.MapGet(
+    "/whatsapp/webhook",
+    (HttpRequest request) =>
     {
-        using var json = JsonDocument.Parse(body);
+        var mode = request.Query["hub.mode"].ToString();
+        var token = request.Query["hub.verify_token"].ToString();
+        var challenge = request.Query["hub.challenge"].ToString();
 
-        var value = json.RootElement
-            .GetProperty("entry")[0]
-            .GetProperty("changes")[0]
-            .GetProperty("value");
+        Console.WriteLine("=== GET VERIFICA√á√ÉO WEBHOOK ===");
+        Console.WriteLine($"hub.mode: {mode}");
+        Console.WriteLine($"hub.verify_token: {token}");
+        Console.WriteLine($"hub.challenge: {challenge}");
 
-        // Quando for status de mensagem enviada, n„o vem "messages". Ent„o ignora.
-        if (!value.TryGetProperty("messages", out var messages))
-            return Results.Ok();
+        if (mode == "subscribe" && token == VERIFY_TOKEN)
+            return Results.Text(challenge, "text/plain");
 
-        var message = messages[0];
+        return Results.Unauthorized();
+    }
+);
 
-        // Por enquanto trata sÛ texto.
-        if (!message.TryGetProperty("text", out var textObject))
-            return Results.Ok();
+app.MapPost(
+    "/whatsapp/webhook",
+    async (HttpRequest request, IHttpClientFactory httpClientFactory) =>
+    {
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync();
 
-        var from = OnlyNumbers(message.GetProperty("from").GetString() ?? "");
-        var text = textObject.GetProperty("body").GetString()?.Trim();
+        Console.WriteLine("=== POST RECEBIDO DO WHATSAPP ===");
+        Console.WriteLine(body);
 
-        var phoneNumberId = value
-            .GetProperty("metadata")
-            .GetProperty("phone_number_id")
-            .GetString();
-
-        if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(phoneNumberId))
-            return Results.Ok();
-
-        Console.WriteLine($"Mensagem recebida de {from}: {text}");
-        Console.WriteLine($"Phone Number ID: {phoneNumberId}");
-
-        if (text.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            conversations.TryRemove(from, out _);
+            using var json = JsonDocument.Parse(body);
 
-            await SendWhatsAppTextAsync(
-                httpClientFactory,
-                phoneNumberId,
+            var value = json
+                .RootElement.GetProperty("entry")[0]
+                .GetProperty("changes")[0]
+                .GetProperty("value");
+
+            // Quando for status de mensagem enviada, n√£o vem "messages". Ent√£o ignora.
+            if (!value.TryGetProperty("messages", out var messages))
+                return Results.Ok();
+
+            var message = messages[0];
+
+            var messageType = message.GetProperty("type").GetString();
+
+            if (messageType == "audio")
+            {
+                var fromAudio = OnlyNumbers(message.GetProperty("from").GetString() ?? "");
+                var phoneNumberIdAudio = value
+                    .GetProperty("metadata")
+                    .GetProperty("phone_number_id")
+                    .GetString();
+
+                var replyText = """
+                    N√£o conseguimos processar mensagens de √°udio durante o or√ßamento.
+
+                    O que prefere fazer?
+
+                    1 - Falar diretamente com um atendente
+                    2 - Digitar sua resposta
+                    """;
+
+                await SendWhatsAppTextAsync(httpClientFactory, phoneNumberIdAudio!, fromAudio, replyText);
+
+                var session = conversations.GetOrAdd(fromAudio, number => new ConversationSession
+                {
+                    Phone = number,
+                    Stage = ConversationStage.Started,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+
+                session.PendingAudioChoice = true;
+                conversations[fromAudio] = session;
+
+                return Results.Ok();
+            }
+
+            // Por enquanto trata s√≥ texto.
+            if (!message.TryGetProperty("text", out var textObject))
+                return Results.Ok();
+
+            var from = OnlyNumbers(message.GetProperty("from").GetString() ?? "");
+            var text = textObject.GetProperty("body").GetString()?.Trim();
+
+            var phoneNumberId = value
+                .GetProperty("metadata")
+                .GetProperty("phone_number_id")
+                .GetString();
+
+            if (
+                string.IsNullOrWhiteSpace(from)
+                || string.IsNullOrWhiteSpace(text)
+                || string.IsNullOrWhiteSpace(phoneNumberId)
+            )
+                return Results.Ok();
+
+            Console.WriteLine($"Mensagem recebida de {from}: {text}");
+            Console.WriteLine($"Phone Number ID: {phoneNumberId}");
+
+            var conversation = conversations.GetOrAdd(
                 from,
-                "Conversa reiniciada. Envie 'Ol·' para comeÁar novamente."
+                number => new ConversationSession
+                {
+                    Phone = number,
+                    Stage = ConversationStage.Started,
+                    UpdatedAt = DateTime.UtcNow,
+                }
             );
+
+            // Se a conversa j√° estava finalizada ou cancelada, reinicia
+            if (conversation.Stage == ConversationStage.Finished || conversation.Stage == ConversationStage.Canceled)
+            {
+                conversations.TryRemove(from, out _);
+                conversation = conversations.GetOrAdd(
+                    from,
+                    number => new ConversationSession
+                    {
+                        Phone = number,
+                        Stage = ConversationStage.Started,
+                        UpdatedAt = DateTime.UtcNow,
+                    }
+                );
+            }
+
+            var reply = ProcessMessage(conversation, text, budgets);
+
+            conversation.UpdatedAt = DateTime.UtcNow;
+            conversations[from] = conversation;
+
+            await SendWhatsAppTextAsync(httpClientFactory, phoneNumberId, from, reply.Message);
 
             return Results.Ok();
         }
-
-        var conversation = conversations.GetOrAdd(from, number => new ConversationSession
+        catch (Exception ex)
         {
-            Phone = number,
-            Stage = ConversationStage.Started,
-            UpdatedAt = DateTime.UtcNow
-        });
+            Console.WriteLine("Erro ao processar webhook do WhatsApp:");
+            Console.WriteLine(ex);
 
-        var reply = ProcessMessage(conversation, text, budgets);
-
-        conversation.UpdatedAt = DateTime.UtcNow;
-        conversations[from] = conversation;
-
-        await SendWhatsAppTextAsync(
-            httpClientFactory,
-            phoneNumberId,
-            from,
-            reply.Message
-        );
-
-        return Results.Ok();
+            return Results.Ok();
+        }
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine("Erro ao processar webhook do WhatsApp:");
-        Console.WriteLine(ex);
-
-        return Results.Ok();
-    }
-});
+);
 
 static async Task SendWhatsAppTextAsync(
     IHttpClientFactory httpClientFactory,
     string phoneNumberId,
     string to,
-    string message)
+    string message
+)
 {
     var token = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN");
 
     if (string.IsNullOrWhiteSpace(token))
     {
-        Console.WriteLine("WHATSAPP_TOKEN n„o configurado.");
+        Console.WriteLine("WHATSAPP_TOKEN n√£o configurado.");
         return;
     }
 
     var client = httpClientFactory.CreateClient();
 
-    client.DefaultRequestHeaders.Authorization =
-        new AuthenticationHeaderValue("Bearer", token);
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
     var payload = new
     {
         messaging_product = "whatsapp",
         to,
         type = "text",
-        text = new
-        {
-            body = message
-        }
+        text = new { body = message },
     };
 
     var json = JsonSerializer.Serialize(payload);
@@ -183,94 +222,165 @@ static async Task SendWhatsAppTextAsync(
 }
 
 // Simulador da conversa
-app.MapPost("/simulator/messages", (IncomingMessage request) =>
-{
-    if (string.IsNullOrWhiteSpace(request.From))
-        return Results.BadRequest("O campo 'from' È obrigatÛrio.");
-
-    if (string.IsNullOrWhiteSpace(request.Body))
-        return Results.BadRequest("O campo 'body' È obrigatÛrio.");
-
-    var phone = OnlyNumbers(request.From);
-    var message = request.Body.Trim();
-
-    if (message.Equals("reset", StringComparison.OrdinalIgnoreCase))
+app.MapPost(
+    "/simulator/messages",
+    (IncomingMessage request) =>
     {
-        conversations.TryRemove(phone, out _);
+        if (string.IsNullOrWhiteSpace(request.From))
+            return Results.BadRequest("O campo 'from' √© obrigat√≥rio.");
 
-        return Results.Ok(new BotReply(
+        if (string.IsNullOrWhiteSpace(request.Body))
+            return Results.BadRequest("O campo 'body' √© obrigat√≥rio.");
+
+        var phone = OnlyNumbers(request.From);
+        var message = request.Body.Trim();
+
+        if (request.Type == "audio")
+        {
+            var session = conversations.GetOrAdd(phone, number => new ConversationSession
+            {
+                Phone = number,
+                Stage = ConversationStage.Started,
+                UpdatedAt = DateTime.UtcNow,
+            });
+
+            session.PendingAudioChoice = true;
+            conversations[phone] = session;
+
+            var replyText = """
+                N√£o conseguimos processar mensagens de √°udio durante o or√ßamento.
+
+                O que prefere fazer?
+
+                1 - Falar diretamente com um atendente
+                2 - Digitar sua resposta
+                """;
+
+            return Results.Ok(new BotReply(phone, replyText));
+        }
+
+        var conversation = conversations.GetOrAdd(
             phone,
-            "Conversa reiniciada. Envie 'Ol·' para comeÁar novamente."
-        ));
+            number => new ConversationSession
+            {
+                Phone = number,
+                Stage = ConversationStage.Started,
+                UpdatedAt = DateTime.UtcNow,
+            }
+        );
+
+        // Se a conversa j√° estava finalizada ou cancelada, reinicia
+        if (conversation.Stage == ConversationStage.Finished || conversation.Stage == ConversationStage.Canceled)
+        {
+            conversations.TryRemove(phone, out _);
+            conversation = conversations.GetOrAdd(
+                phone,
+                number => new ConversationSession
+                {
+                    Phone = number,
+                    Stage = ConversationStage.Started,
+                    UpdatedAt = DateTime.UtcNow,
+                }
+            );
+        }
+
+        var reply = ProcessMessage(conversation, message, budgets);
+
+        conversation.UpdatedAt = DateTime.UtcNow;
+        conversations[phone] = conversation;
+
+        return Results.Ok(reply);
     }
+);
 
-    var conversation = conversations.GetOrAdd(phone, number => new ConversationSession
+// Lista or√ßamentos
+app.MapGet(
+    "/budgets",
+    () =>
     {
-        Phone = number,
-        Stage = ConversationStage.Started,
-        UpdatedAt = DateTime.UtcNow
-    });
-
-    var reply = ProcessMessage(conversation, message, budgets);
-
-    conversation.UpdatedAt = DateTime.UtcNow;
-    conversations[phone] = conversation;
-
-    return Results.Ok(reply);
-});
-
-// Lista orÁamentos
-app.MapGet("/budgets", () =>
-{
-    return Results.Ok(
-        budgets.Values
-            .OrderByDescending(x => x.CreatedAt)
-            .ToList()
-    );
-});
+        return Results.Ok(budgets.Values.OrderByDescending(x => x.CreatedAt).ToList());
+    }
+);
 
 // Lista conversas
-app.MapGet("/conversations", () =>
-{
-    return Results.Ok(
-        conversations.Values
-            .OrderByDescending(x => x.UpdatedAt)
-            .ToList()
-    );
-});
+app.MapGet(
+    "/conversations",
+    () =>
+    {
+        return Results.Ok(conversations.Values.OrderByDescending(x => x.UpdatedAt).ToList());
+    }
+);
 
-// Atualiza status do orÁamento
-app.MapPatch("/budgets/{id:guid}/status", (Guid id, UpdateBudgetStatusRequest request) =>
-{
-    if (!budgets.TryGetValue(id, out var budget))
-        return Results.NotFound("OrÁamento n„o encontrado.");
+// Atualiza status do or√ßamento
+app.MapPatch(
+    "/budgets/{id:guid}/status",
+    (Guid id, UpdateBudgetStatusRequest request) =>
+    {
+        if (!budgets.TryGetValue(id, out var budget))
+            return Results.NotFound("Or√ßamento n√£o encontrado.");
 
-    if (string.IsNullOrWhiteSpace(request.Status))
-        return Results.BadRequest("Status È obrigatÛrio.");
+        if (string.IsNullOrWhiteSpace(request.Status))
+            return Results.BadRequest("Status √© obrigat√≥rio.");
 
-    budget.Status = request.Status.Trim();
-    budget.UpdatedAt = DateTime.UtcNow;
+        budget.Status = request.Status.Trim();
+        budget.UpdatedAt = DateTime.UtcNow;
 
-    budgets[id] = budget;
+        budgets[id] = budget;
 
-    return Results.Ok(budget);
-});
+        return Results.Ok(budget);
+    }
+);
 
 // Limpa tudo para testar de novo
-app.MapPost("/simulator/reset-all", () =>
-{
-    conversations.Clear();
-    budgets.Clear();
+app.MapPost(
+    "/simulator/reset-all",
+    () =>
+    {
+        conversations.Clear();
+        budgets.Clear();
 
-    return Results.Ok("Conversas e orÁamentos apagados.");
-});
+        return Results.Ok("Conversas e or√ßamentos apagados.");
+    }
+);
 app.MapFallbackToFile("index.html");
 app.Run("http://0.0.0.0:5080");
 static BotReply ProcessMessage(
     ConversationSession conversation,
     string message,
-    ConcurrentDictionary<Guid, Budget> budgets)
+    ConcurrentDictionary<Guid, Budget> budgets
+)
 {
+    if (conversation.PendingAudioChoice)
+    {
+        if (message == "1")
+        {
+            conversation.PendingAudioChoice = false;
+            return SendToHuman(conversation);
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingAudioChoice = false;
+            // The client chose to type the answer, so we will just re-ask the question for the current stage.
+            // Since we don't have a generic "ReAsk" function, we let the flow continue.
+            // Actually, a better approach is to reply based on the current stage if possible, or just let them send the new text.
+            // For now, let's acknowledge and say they can send the text.
+            return new BotReply(conversation.Phone, "Pode digitar sua resposta agora.");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            """
+            Op√ß√£o inv√°lida.
+
+            O que prefere fazer?
+
+            1 - Falar diretamente com um atendente
+            2 - Digitar sua resposta
+            """
+        );
+    }
+
     if (conversation.Stage == ConversationStage.Started)
     {
         conversation.Stage = ConversationStage.MenuSent;
@@ -278,11 +388,11 @@ static BotReply ProcessMessage(
         return new BotReply(
             conversation.Phone,
             """
-            Ol·! Sou o assistente do depÛsito.
+            Ol√°! Sou o assistente do dep√≥sito.
 
-            Escolha uma opÁ„o:
+            Escolha uma op√ß√£o:
 
-            1 - Fazer orÁamento
+            1 - Fazer or√ßamento
             2 - Ver produtos/categorias
             3 - Falar com atendente
             """
@@ -299,42 +409,95 @@ static BotReply ProcessMessage(
             _ => new BotReply(
                 conversation.Phone,
                 """
-                N„o entendi sua opÁ„o.
+                N√£o entendi sua op√ß√£o.
 
-                Escolha uma opÁ„o:
+                Escolha uma op√ß√£o:
 
-                1 - Fazer orÁamento
+                1 - Fazer or√ßamento
                 2 - Ver produtos/categorias
                 3 - Falar com atendente
                 """
-            )
+            ),
         };
     }
 
     if (conversation.Stage == ConversationStage.WaitingProduct)
     {
-        conversation.Product = message;
-        conversation.Stage = ConversationStage.WaitingQuantity;
+        conversation.PendingProduct = message;
+        conversation.Stage = ConversationStage.ConfirmingProduct;
 
         return new BotReply(
             conversation.Phone,
-            "Qual a quantidade aproximada?"
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
+
+    if (conversation.Stage == ConversationStage.ConfirmingProduct)
+    {
+        if (message == "1")
+        {
+            conversation.Product = conversation.PendingProduct;
+            conversation.PendingProduct = null;
+            conversation.Stage = ConversationStage.WaitingQuantity;
+
+            return new BotReply(conversation.Phone, "Qual a quantidade aproximada?");
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingProduct = null;
+            conversation.Stage = ConversationStage.WaitingProduct;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Qual produto ou material voc√™ precisa?");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
         );
     }
 
     if (conversation.Stage == ConversationStage.WaitingQuantity)
     {
-        conversation.Quantity = message;
-        conversation.Stage = ConversationStage.WaitingDeliveryType;
+        conversation.PendingQuantity = message;
+        conversation.Stage = ConversationStage.ConfirmingQuantity;
 
         return new BotReply(
             conversation.Phone,
-            """
-            VocÍ prefere:
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
 
-            1 - Retirada no depÛsito
-            2 - Entrega
-            """
+    if (conversation.Stage == ConversationStage.ConfirmingQuantity)
+    {
+        if (message == "1")
+        {
+            conversation.Quantity = conversation.PendingQuantity;
+            conversation.PendingQuantity = null;
+            conversation.Stage = ConversationStage.WaitingDeliveryType;
+
+            return new BotReply(
+                conversation.Phone,
+                """
+                Voc√™ prefere:
+
+                1 - Retirada no dep√≥sito
+                2 - Entrega
+                """
+            );
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingQuantity = null;
+            conversation.Stage = ConversationStage.WaitingQuantity;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Qual a quantidade aproximada?");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
         );
     }
 
@@ -349,15 +512,15 @@ static BotReply ProcessMessage(
             return new BotReply(
                 conversation.Phone,
                 $"""
-            Retire no seguinte endereÁo:
+                Retire no seguinte endere√ßo:
 
-            {DEPOSIT_ADDRESS}
+                {DEPOSIT_ADDRESS}
 
-            VocÍ j· tem cadastro?
+                Voc√™ j√° tem cadastro?
 
-            1 - Sim
-            2 - N„o
-            """
+                1 - Sim
+                2 - N√£o
+                """
             );
         }
 
@@ -370,28 +533,28 @@ static BotReply ProcessMessage(
             return new BotReply(
                 conversation.Phone,
                 $"""
-            Entrega selecionada.
+                Entrega selecionada.
 
-            Prazo mÌnimo para entrega: {MINIMUM_DELIVERY_DAYS} dias ˙teis.
+                Prazo m√≠nimo para entrega: {MINIMUM_DELIVERY_DAYS} dias √∫teis.
 
-            VocÍ j· tem cadastro?
+                Voc√™ j√° tem cadastro?
 
-            1 - Sim
-            2 - N„o
-            """
+                1 - Sim
+                2 - N√£o
+                """
             );
         }
 
         return new BotReply(
             conversation.Phone,
             """
-        OpÁ„o inv·lida.
+            Op√ß√£o inv√°lida.
 
-        Escolha:
+            Escolha:
 
-        1 - Retirada no depÛsito
-        2 - Entrega
-        """
+            1 - Retirada no dep√≥sito
+            2 - Entrega
+            """
         );
     }
 
@@ -414,72 +577,201 @@ static BotReply ProcessMessage(
             conversation.HasRegistration = false;
             conversation.Stage = ConversationStage.WaitingFullName;
 
-            return new BotReply(
-                conversation.Phone,
-                "Informe seu nome completo."
-            );
+            return new BotReply(conversation.Phone, "Informe seu nome completo.");
         }
 
         return new BotReply(
             conversation.Phone,
             """
-        OpÁ„o inv·lida.
+            Op√ß√£o inv√°lida.
 
-        VocÍ j· tem cadastro?
+            Voc√™ j√° tem cadastro?
 
-        1 - Sim
-        2 - N„o
-        """
+            1 - Sim
+            2 - N√£o
+            """
         );
     }
 
     if (conversation.Stage == ConversationStage.WaitingRegisteredCustomerName)
     {
-        conversation.CustomerName = message;
-        conversation.Stage = ConversationStage.AskingContinueBudget;
+        conversation.PendingCustomerName = message;
+        conversation.Stage = ConversationStage.ConfirmingCustomerName;
 
-        return AskContinueBudget(conversation);
+        return new BotReply(
+            conversation.Phone,
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
+
+    if (conversation.Stage == ConversationStage.ConfirmingCustomerName)
+    {
+        if (message == "1")
+        {
+            conversation.CustomerName = conversation.PendingCustomerName;
+            conversation.PendingCustomerName = null;
+            conversation.Stage = ConversationStage.AskingContinueBudget;
+
+            return AskContinueBudget(conversation);
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingCustomerName = null;
+            conversation.Stage = ConversationStage.WaitingRegisteredCustomerName;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Informe o nome completo do cadastro.");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
     }
 
     if (conversation.Stage == ConversationStage.WaitingFullName)
     {
-        conversation.CustomerName = message;
-        conversation.Stage = ConversationStage.WaitingCustomerAddress;
+        conversation.PendingCustomerName = message;
+        conversation.Stage = ConversationStage.ConfirmingCustomerName;
 
         return new BotReply(
             conversation.Phone,
-            "Informe seu endereÁo completo."
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
+
+    if (conversation.Stage == ConversationStage.ConfirmingCustomerName && conversation.HasRegistration == false)
+    {
+        // This case handles confirmation when HasRegistration is false
+        if (message == "1")
+        {
+            conversation.CustomerName = conversation.PendingCustomerName;
+            conversation.PendingCustomerName = null;
+            conversation.Stage = ConversationStage.WaitingCustomerAddress;
+
+            return new BotReply(conversation.Phone, "Informe seu endere√ßo completo.");
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingCustomerName = null;
+            conversation.Stage = ConversationStage.WaitingFullName;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Informe seu nome completo.");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
         );
     }
 
     if (conversation.Stage == ConversationStage.WaitingCustomerAddress)
     {
-        conversation.CustomerAddress = message;
-        conversation.Stage = ConversationStage.WaitingCustomerPhone;
+        conversation.PendingCustomerAddress = message;
+        conversation.Stage = ConversationStage.ConfirmingCustomerAddress;
 
         return new BotReply(
             conversation.Phone,
-            "Informe seu telefone principal."
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
+
+    if (conversation.Stage == ConversationStage.ConfirmingCustomerAddress)
+    {
+        if (message == "1")
+        {
+            conversation.CustomerAddress = conversation.PendingCustomerAddress;
+            conversation.PendingCustomerAddress = null;
+            conversation.Stage = ConversationStage.WaitingCustomerPhone;
+
+            return new BotReply(conversation.Phone, "Informe seu telefone principal.");
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingCustomerAddress = null;
+            conversation.Stage = ConversationStage.WaitingCustomerAddress;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Informe seu endere√ßo completo.");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
         );
     }
 
     if (conversation.Stage == ConversationStage.WaitingCustomerPhone)
     {
-        conversation.CustomerPhone = message;
-        conversation.Stage = ConversationStage.WaitingSecondPhone;
+        conversation.PendingCustomerPhone = message;
+        conversation.Stage = ConversationStage.ConfirmingCustomerPhone;
 
         return new BotReply(
             conversation.Phone,
-            "Informe um segundo telefone para contato."
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
+
+    if (conversation.Stage == ConversationStage.ConfirmingCustomerPhone)
+    {
+        if (message == "1")
+        {
+            conversation.CustomerPhone = conversation.PendingCustomerPhone;
+            conversation.PendingCustomerPhone = null;
+            conversation.Stage = ConversationStage.WaitingSecondPhone;
+
+            return new BotReply(conversation.Phone, "Informe um segundo telefone para contato.");
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingCustomerPhone = null;
+            conversation.Stage = ConversationStage.WaitingCustomerPhone;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Informe seu telefone principal.");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
         );
     }
 
     if (conversation.Stage == ConversationStage.WaitingSecondPhone)
     {
-        conversation.SecondPhone = message;
-        conversation.Stage = ConversationStage.AskingContinueBudget;
+        conversation.PendingSecondPhone = message;
+        conversation.Stage = ConversationStage.ConfirmingSecondPhone;
 
-        return AskContinueBudget(conversation);
+        return new BotReply(
+            conversation.Phone,
+            $"Voc√™ digitou: *{message}*\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
+    }
+
+    if (conversation.Stage == ConversationStage.ConfirmingSecondPhone)
+    {
+        if (message == "1")
+        {
+            conversation.SecondPhone = conversation.PendingSecondPhone;
+            conversation.PendingSecondPhone = null;
+            conversation.Stage = ConversationStage.AskingContinueBudget;
+
+            return AskContinueBudget(conversation);
+        }
+
+        if (message == "2")
+        {
+            conversation.PendingSecondPhone = null;
+            conversation.Stage = ConversationStage.WaitingSecondPhone;
+
+            return new BotReply(conversation.Phone, "Tudo bem. Informe um segundo telefone para contato.");
+        }
+
+        return new BotReply(
+            conversation.Phone,
+            "Op√ß√£o inv√°lida.\n\nEssa informa√ß√£o est√° correta?\n\n1 - Sim\n2 - N√£o"
+        );
     }
 
     if (conversation.Stage == ConversationStage.AskingContinueBudget)
@@ -491,22 +783,22 @@ static BotReply ProcessMessage(
 
             conversation.Stage = ConversationStage.Finished;
 
-            var hasRegistrationText = budget.HasRegistration ? "Sim" : "N„o";
+            var hasRegistrationText = budget.HasRegistration ? "Sim" : "N√£o";
 
             return new BotReply(
                 conversation.Phone,
                 $"""
-    OrÁamento registrado com sucesso!
+                Or√ßamento registrado com sucesso!
 
-    Cliente: {budget.CustomerName}
-    Possui cadastro: {hasRegistrationText}
-    Produto: {budget.Product}
-    Quantidade: {budget.Quantity}
-    Tipo: {budget.DeliveryType}
-    Status: {budget.Status}
+                Cliente: {budget.CustomerName}
+                Possui cadastro: {hasRegistrationText}
+                Produto: {budget.Product}
+                Quantidade: {budget.Quantity}
+                Tipo: {budget.DeliveryType}
+                Status: {budget.Status}
 
-    Um atendente vai analisar e retornar em breve.
-    """
+                Um atendente vai analisar e retornar em breve.
+                """
             );
         }
 
@@ -520,9 +812,9 @@ static BotReply ProcessMessage(
             return new BotReply(
                 conversation.Phone,
                 """
-                Tudo bem. O orÁamento foi cancelado.
+                Tudo bem. O or√ßamento foi cancelado.
 
-                Caso precise novamente, envie "reset" e comece uma nova simulaÁ„o.
+                Para realizar um novo or√ßamento, envie uma mensagem.
                 """
             );
         }
@@ -530,12 +822,12 @@ static BotReply ProcessMessage(
         return new BotReply(
             conversation.Phone,
             """
-            OpÁ„o inv·lida.
+            Op√ß√£o inv√°lida.
 
-            Deseja continuar com o orÁamento?
+            Deseja continuar com o or√ßamento?
 
             1 - Sim
-            2 - N„o
+            2 - N√£o
             """
         );
     }
@@ -544,48 +836,18 @@ static BotReply ProcessMessage(
     {
         return new BotReply(
             conversation.Phone,
-            "Sua conversa j· foi marcada para atendimento humano. Um atendente continuar· o contato."
+            "Sua conversa j√° foi marcada para atendimento humano. Um atendente continuar√° o contato."
         );
     }
 
-    if (conversation.Stage == ConversationStage.Finished)
-    {
-        return new BotReply(
-            conversation.Phone,
-            """
-            VocÍ j· possui um orÁamento registrado.
-
-            Para iniciar uma nova simulaÁ„o, envie "reset".
-            """
-        );
-    }
-
-    if (conversation.Stage == ConversationStage.Canceled)
-    {
-        return new BotReply(
-            conversation.Phone,
-            """
-            Este orÁamento foi cancelado.
-
-            Para iniciar novamente, envie "reset".
-            """
-        );
-    }
-
-    return new BotReply(
-        conversation.Phone,
-        "N„o consegui processar sua mensagem."
-    );
+    return new BotReply(conversation.Phone, "N√£o consegui processar sua mensagem.");
 }
 
 static BotReply AskProduct(ConversationSession conversation)
 {
     conversation.Stage = ConversationStage.WaitingProduct;
 
-    return new BotReply(
-        conversation.Phone,
-        "Qual produto ou material vocÍ precisa?"
-    );
+    return new BotReply(conversation.Phone, "Qual produto ou material voc√™ precisa?");
 }
 
 static BotReply ShowCategories(ConversationSession conversation)
@@ -602,10 +864,10 @@ static BotReply ShowCategories(ConversationSession conversation)
         - Pedra
         - Blocos
         - Ferragens
-        - Materiais hidr·ulicos
-        - Materiais elÈtricos
+        - Materiais hidr√°ulicos
+        - Materiais el√©tricos
 
-        Para fazer um orÁamento, digite 1.
+        Para fazer um or√ßamento, digite 1.
         """
     );
 }
@@ -622,45 +884,47 @@ static BotReply SendToHuman(ConversationSession conversation)
 
 static BotReply AskContinueBudget(ConversationSession conversation)
 {
-    var hasRegistrationText = conversation.HasRegistration == true ? "Sim" : "N„o";
+    var hasRegistrationText = conversation.HasRegistration == true ? "Sim" : "N√£o";
 
-    var deliveryInfo = conversation.DeliveryType == "Entrega"
-        ? $"""
-          Tipo de entrega: Entrega
-          Prazo mÌnimo: {conversation.MinimumDeliveryDays} dias ˙teis
-          """
-        : $"""
-          Tipo de entrega: Retirada
-          Retirada no endereÁo: {DEPOSIT_ADDRESS}
-          """;
+    var deliveryInfo =
+        conversation.DeliveryType == "Entrega"
+            ? $"""
+                Tipo de entrega: Entrega
+                Prazo m√≠nimo: {conversation.MinimumDeliveryDays} dias √∫teis
+                """
+            : $"""
+                Tipo de entrega: Retirada
+                Retirada no endere√ßo: {DEPOSIT_ADDRESS}
+                """;
 
-    var customerInfo = conversation.HasRegistration == true
-        ? $"""
-          Cliente: {conversation.CustomerName}
-          Possui cadastro: {hasRegistrationText}
-          """
-        : $"""
-          Cliente: {conversation.CustomerName}
-          Possui cadastro: {hasRegistrationText}
-          EndereÁo informado: {conversation.CustomerAddress}
-          Telefone principal: {conversation.CustomerPhone}
-          Segundo telefone: {conversation.SecondPhone}
-          """;
+    var customerInfo =
+        conversation.HasRegistration == true
+            ? $"""
+                Cliente: {conversation.CustomerName}
+                Possui cadastro: {hasRegistrationText}
+                """
+            : $"""
+                Cliente: {conversation.CustomerName}
+                Possui cadastro: {hasRegistrationText}
+                Endere√ßo informado: {conversation.CustomerAddress}
+                Telefone principal: {conversation.CustomerPhone}
+                Segundo telefone: {conversation.SecondPhone}
+                """;
 
     return new BotReply(
         conversation.Phone,
         $"""
-        Resumo do orÁamento:
+        Resumo do or√ßamento:
 
         {customerInfo}
         Produto: {conversation.Product}
         Quantidade: {conversation.Quantity}
         {deliveryInfo}
 
-        Deseja continuar com o orÁamento?
+        Deseja continuar com o or√ßamento?
 
         1 - Sim
-        2 - N„o
+        2 - N√£o
         """
     );
 }
@@ -670,14 +934,13 @@ static Budget CreateBudget(ConversationSession conversation, string status)
     return new Budget
     {
         Id = Guid.NewGuid(),
-        CustomerName = conversation.CustomerName ?? "Cliente n„o informado",
+        CustomerName = conversation.CustomerName ?? "Cliente n√£o informado",
         Phone = conversation.Phone,
-        Product = conversation.Product ?? "N„o informado",
-        Quantity = conversation.Quantity ?? "N„o informado",
-        DeliveryType = conversation.DeliveryType ?? "N„o informado",
-        DeliveryAddress = conversation.HasRegistration == true
-    ? null
-    : conversation.CustomerAddress,
+        Product = conversation.Product ?? "N√£o informado",
+        Quantity = conversation.Quantity ?? "N√£o informado",
+        DeliveryType = conversation.DeliveryType ?? "N√£o informado",
+        DeliveryAddress =
+            conversation.HasRegistration == true ? null : conversation.CustomerAddress,
         DepositAddress = conversation.DeliveryType == "Retirada" ? DEPOSIT_ADDRESS : null,
         HasRegistration = conversation.HasRegistration ?? false,
         CustomerAddress = conversation.CustomerAddress,
@@ -686,7 +949,7 @@ static Budget CreateBudget(ConversationSession conversation, string status)
         MinimumDeliveryDays = conversation.MinimumDeliveryDays,
         Status = status,
         CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
+        UpdatedAt = DateTime.UtcNow,
     };
 }
 
@@ -695,7 +958,7 @@ static string OnlyNumbers(string value)
     return new string(value.Where(char.IsDigit).ToArray());
 }
 
-public record IncomingMessage(string From, string Body);
+public record IncomingMessage(string From, string Body, string? Type = "text");
 
 public record BotReply(string To, string Message);
 
@@ -719,6 +982,14 @@ public class ConversationSession
     public string? CustomerAddress { get; set; }
     public string? CustomerPhone { get; set; }
     public string? SecondPhone { get; set; }
+
+    public string? PendingProduct { get; set; }
+    public string? PendingQuantity { get; set; }
+    public string? PendingCustomerName { get; set; }
+    public string? PendingCustomerAddress { get; set; }
+    public string? PendingCustomerPhone { get; set; }
+    public string? PendingSecondPhone { get; set; }
+    public bool PendingAudioChoice { get; set; }
 
     public DateTime UpdatedAt { get; set; }
 }
@@ -758,7 +1029,6 @@ public enum ConversationStage
     WaitingProduct = 2,
     WaitingQuantity = 3,
     WaitingDeliveryType = 4,
-    WaitingDeliveryAddress = 5,
 
     AskingHasRegistration = 6,
 
@@ -773,5 +1043,13 @@ public enum ConversationStage
 
     HumanSupport = 13,
     Finished = 14,
-    Canceled = 15
+    Canceled = 15,
+
+    ConfirmingProduct = 16,
+    ConfirmingQuantity = 17,
+    ConfirmingCustomerName = 18,
+    ConfirmingCustomerAddress = 19,
+    ConfirmingCustomerPhone = 20,
+    ConfirmingSecondPhone = 21,
+    ConfirmingAudioChoice = 22,
 }
