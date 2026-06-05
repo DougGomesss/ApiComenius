@@ -28,7 +28,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 const string VERIFY_TOKEN = "deposito-poc-123";
-const string DEPOSIT_ADDRESS = "Rua Exemplo, 123 - Bairro - São Paulo/SP";
+const string DEPOSIT_ADDRESS = "R. João Amós Comenius, 181 - Jardim São Bernardo, São Paulo - SP, 04844-420";
 const int MINIMUM_DELIVERY_DAYS = 2;
 
 var conversations = new ConcurrentDictionary<string, ConversationSession>();
