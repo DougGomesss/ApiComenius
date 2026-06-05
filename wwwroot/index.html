@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>POC - Orçamentos WhatsApp</title>
-    <script type="module" crossorigin src="/assets/index-C67ohG1s.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-c1R6x8Ta.css">
+    <script type="module" crossorigin src="/assets/index-DTahyNGP.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BC-NBaQm.css">
   </head>
   <body>
     <div id="app">
@@ -31,8 +31,26 @@
 
           <div id="budgetsList" class="budgets-list"></div>
         </section>
+
+        <section class="budgets-panel">
+          <div class="panel-header">
+            <h2>Clientes em espera</h2>
+            <button id="refreshWaitingButton">Atualizar</button>
+          </div>
+
+          <div id="waitingList" class="budgets-list"></div>
+        </section>
+
+        <section class="budgets-panel">
+          <div class="panel-header">
+            <h2>Orçamentos cancelados</h2>
+            <button id="refreshCanceledButton">Atualizar</button>
+          </div>
+
+          <div id="canceledList" class="budgets-list"></div>
+        </section>
       </main>
     </div>
-
+
   </body>
 </html>

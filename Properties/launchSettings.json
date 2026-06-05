@@ -7,7 +7,8 @@
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5145",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "WHATSAPP_TOKEN": "EAAKoQeHQqMABRjr2tZC4RWEKY5XQLyFDRhjkvp2n1ZAVwWPNZBbKyiKZAYTDX1f1g3LYaknBBZCqxwU13CZASXFDJ0T52DmhCXIMYCm0eBKQ9tIZC3Ihh8mZCgAdiBp6fm65RkOF6GE3hv6YJihExNz65BZAZBztMc2jS5eSNmtrIjTvXIpLs6AgZBX1K6Bplhn4QZDZD"
       }
     },
     "https": {
@@ -16,7 +17,8 @@
       "launchBrowser": true,
       "applicationUrl": "https://localhost:7185;http://localhost:5145",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "WHATSAPP_TOKEN": "EAAKoQeHQqMABRjr2tZC4RWEKY5XQLyFDRhjkvp2n1ZAVwWPNZBbKyiKZAYTDX1f1g3LYaknBBZCqxwU13CZASXFDJ0T52DmhCXIMYCm0eBKQ9tIZC3Ihh8mZCgAdiBp6fm65RkOF6GE3hv6YJihExNz65BZAZBztMc2jS5eSNmtrIjTvXIpLs6AgZBX1K6Bplhn4QZDZD"
       }
     }
   }

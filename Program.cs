@@ -74,7 +74,6 @@ app.MapPost(
                 .GetProperty("changes")[0]
                 .GetProperty("value");
 
-            // Quando for status de mensagem enviada, não vem "messages". Então ignora.
             if (!value.TryGetProperty("messages", out var messages))
                 return Results.Ok();
 
@@ -91,22 +90,30 @@ app.MapPost(
                     .GetString();
 
                 var replyText = """
-                    Não conseguimos processar mensagens de áudio durante o orçamento.
+                Não conseguimos processar mensagens de áudio durante o orçamento.
 
-                    O que prefere fazer?
+                O que prefere fazer?
 
-                    1 - Falar diretamente com um atendente
-                    2 - Digitar sua resposta
-                    """;
+                1 - Falar diretamente com um atendente
+                2 - Digitar sua resposta
+                """;
 
-                await SendWhatsAppTextAsync(httpClientFactory, phoneNumberIdAudio!, fromAudio, replyText);
+                await SendWhatsAppTextAsync(
+                    httpClientFactory,
+                    phoneNumberIdAudio!,
+                    fromAudio,
+                    replyText
+                );
 
-                var session = conversations.GetOrAdd(fromAudio, number => new ConversationSession
-                {
-                    Phone = number,
-                    Stage = ConversationStage.Started,
-                    UpdatedAt = DateTime.UtcNow,
-                });
+                var session = conversations.GetOrAdd(
+                    fromAudio,
+                    number => new ConversationSession
+                    {
+                        Phone = number,
+                        Stage = ConversationStage.Started,
+                        UpdatedAt = DateTime.UtcNow,
+                    }
+                );
 
                 session.PendingAudioChoice = true;
                 conversations[fromAudio] = session;
@@ -114,7 +121,6 @@ app.MapPost(
                 return Results.Ok();
             }
 
-            // Por enquanto trata só texto.
             if (!message.TryGetProperty("text", out var textObject))
                 return Results.Ok();
 
@@ -146,8 +152,11 @@ app.MapPost(
                 }
             );
 
-            // Se a conversa já estava finalizada ou cancelada, reinicia
-            if (conversation.Stage == ConversationStage.Finished || conversation.Stage == ConversationStage.Canceled)
+            if (
+                conversation.Stage == ConversationStage.Finished
+                || conversation.Stage == ConversationStage.Canceled
+                || conversation.Stage == ConversationStage.Attended
+            )
             {
                 conversations.TryRemove(from, out _);
                 conversation = conversations.GetOrAdd(
@@ -166,7 +175,8 @@ app.MapPost(
             conversation.UpdatedAt = DateTime.UtcNow;
             conversations[from] = conversation;
 
-            await SendWhatsAppTextAsync(httpClientFactory, phoneNumberId, from, reply.Message);
+            if (!string.IsNullOrEmpty(reply.Message))
+                await SendWhatsAppTextAsync(httpClientFactory, phoneNumberId, from, reply.Message);
 
             return Results.Ok();
         }
@@ -188,6 +198,9 @@ static async Task SendWhatsAppTextAsync(
 )
 {
     var token = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN");
+
+    Console.WriteLine("=== DEBUG TOKEN ===");
+    Console.WriteLine(Environment.GetEnvironmentVariable("WHATSAPP_TOKEN"));
 
     if (string.IsNullOrWhiteSpace(token))
     {
@@ -221,7 +234,6 @@ static async Task SendWhatsAppTextAsync(
     Console.WriteLine(responseBody);
 }
 
-// Simulador da conversa
 app.MapPost(
     "/simulator/messages",
     (IncomingMessage request) =>
@@ -237,24 +249,27 @@ app.MapPost(
 
         if (request.Type == "audio")
         {
-            var session = conversations.GetOrAdd(phone, number => new ConversationSession
-            {
-                Phone = number,
-                Stage = ConversationStage.Started,
-                UpdatedAt = DateTime.UtcNow,
-            });
+            var session = conversations.GetOrAdd(
+                phone,
+                number => new ConversationSession
+                {
+                    Phone = number,
+                    Stage = ConversationStage.Started,
+                    UpdatedAt = DateTime.UtcNow,
+                }
+            );
 
             session.PendingAudioChoice = true;
             conversations[phone] = session;
 
             var replyText = """
-                Não conseguimos processar mensagens de áudio durante o orçamento.
+            Não conseguimos processar mensagens de áudio durante o orçamento.
 
-                O que prefere fazer?
+            O que prefere fazer?
 
-                1 - Falar diretamente com um atendente
-                2 - Digitar sua resposta
-                """;
+            1 - Falar diretamente com um atendente
+            2 - Digitar sua resposta
+            """;
 
             return Results.Ok(new BotReply(phone, replyText));
         }
@@ -269,8 +284,11 @@ app.MapPost(
             }
         );
 
-        // Se a conversa já estava finalizada ou cancelada, reinicia
-        if (conversation.Stage == ConversationStage.Finished || conversation.Stage == ConversationStage.Canceled)
+        if (
+            conversation.Stage == ConversationStage.Finished
+            || conversation.Stage == ConversationStage.Canceled
+            || conversation.Stage == ConversationStage.Attended
+        )
         {
             conversations.TryRemove(phone, out _);
             conversation = conversations.GetOrAdd(
@@ -289,11 +307,13 @@ app.MapPost(
         conversation.UpdatedAt = DateTime.UtcNow;
         conversations[phone] = conversation;
 
+        if (string.IsNullOrEmpty(reply.Message))
+            return Results.Ok();
+
         return Results.Ok(reply);
     }
 );
 
-// Lista orçamentos
 app.MapGet(
     "/budgets",
     () =>
@@ -302,7 +322,6 @@ app.MapGet(
     }
 );
 
-// Lista conversas
 app.MapGet(
     "/conversations",
     () =>
@@ -311,7 +330,26 @@ app.MapGet(
     }
 );
 
-// Atualiza status do orçamento
+app.MapPatch(
+    "/conversations/{phone}/attendance",
+    (string phone, UpdateAttendanceRequest request) =>
+    {
+        var normalized = OnlyNumbers(phone);
+
+        if (!conversations.TryGetValue(normalized, out var conversation))
+            return Results.NotFound("Conversa não encontrada.");
+
+        conversation.Stage = request.Attended
+            ? ConversationStage.Attended
+            : ConversationStage.HumanSupport;
+        conversation.UpdatedAt = DateTime.UtcNow;
+
+        conversations[normalized] = conversation;
+
+        return Results.Ok(conversation);
+    }
+);
+
 app.MapPatch(
     "/budgets/{id:guid}/status",
     (Guid id, UpdateBudgetStatusRequest request) =>
@@ -331,7 +369,6 @@ app.MapPatch(
     }
 );
 
-// Limpa tudo para testar de novo
 app.MapPost(
     "/simulator/reset-all",
     () =>
@@ -350,6 +387,9 @@ static BotReply ProcessMessage(
     ConcurrentDictionary<Guid, Budget> budgets
 )
 {
+    if (conversation.Stage == ConversationStage.HumanSupport)
+        return new BotReply(conversation.Phone, string.Empty);
+
     if (conversation.PendingAudioChoice)
     {
         if (message == "1")
@@ -361,11 +401,7 @@ static BotReply ProcessMessage(
         if (message == "2")
         {
             conversation.PendingAudioChoice = false;
-            // The client chose to type the answer, so we will just re-ask the question for the current stage.
-            // Since we don't have a generic "ReAsk" function, we let the flow continue.
-            // Actually, a better approach is to reply based on the current stage if possible, or just let them send the new text.
-            // For now, let's acknowledge and say they can send the text.
-            return new BotReply(conversation.Phone, "Pode digitar sua resposta agora.");
+            return AskCurrentStage(conversation);
         }
 
         return new BotReply(
@@ -448,7 +484,10 @@ static BotReply ProcessMessage(
             conversation.PendingProduct = null;
             conversation.Stage = ConversationStage.WaitingProduct;
 
-            return new BotReply(conversation.Phone, "Tudo bem. Qual produto ou material você precisa?");
+            return new BotReply(
+                conversation.Phone,
+                "Tudo bem. Qual produto ou material você precisa?"
+            );
         }
 
         return new BotReply(
@@ -620,7 +659,10 @@ static BotReply ProcessMessage(
             conversation.PendingCustomerName = null;
             conversation.Stage = ConversationStage.WaitingRegisteredCustomerName;
 
-            return new BotReply(conversation.Phone, "Tudo bem. Informe o nome completo do cadastro.");
+            return new BotReply(
+                conversation.Phone,
+                "Tudo bem. Informe o nome completo do cadastro."
+            );
         }
 
         return new BotReply(
@@ -632,7 +674,7 @@ static BotReply ProcessMessage(
     if (conversation.Stage == ConversationStage.WaitingFullName)
     {
         conversation.PendingCustomerName = message;
-        conversation.Stage = ConversationStage.ConfirmingCustomerName;
+        conversation.Stage = ConversationStage.ConfirmingFullName;
 
         return new BotReply(
             conversation.Phone,
@@ -640,9 +682,8 @@ static BotReply ProcessMessage(
         );
     }
 
-    if (conversation.Stage == ConversationStage.ConfirmingCustomerName && conversation.HasRegistration == false)
+    if (conversation.Stage == ConversationStage.ConfirmingFullName)
     {
-        // This case handles confirmation when HasRegistration is false
         if (message == "1")
         {
             conversation.CustomerName = conversation.PendingCustomerName;
@@ -765,7 +806,10 @@ static BotReply ProcessMessage(
             conversation.PendingSecondPhone = null;
             conversation.Stage = ConversationStage.WaitingSecondPhone;
 
-            return new BotReply(conversation.Phone, "Tudo bem. Informe um segundo telefone para contato.");
+            return new BotReply(
+                conversation.Phone,
+                "Tudo bem. Informe um segundo telefone para contato."
+            );
         }
 
         return new BotReply(
@@ -832,15 +876,55 @@ static BotReply ProcessMessage(
         );
     }
 
-    if (conversation.Stage == ConversationStage.HumanSupport)
-    {
-        return new BotReply(
-            conversation.Phone,
-            "Sua conversa já foi marcada para atendimento humano. Um atendente continuará o contato."
-        );
-    }
-
     return new BotReply(conversation.Phone, "Não consegui processar sua mensagem.");
+}
+
+static BotReply AskCurrentStage(ConversationSession conversation)
+{
+    return conversation.Stage switch
+    {
+        ConversationStage.Started or ConversationStage.MenuSent => new BotReply(
+            conversation.Phone,
+            """
+            Olá! Sou o assistente do depósito.
+
+            Escolha uma opção:
+
+            1 - Fazer orçamento
+            2 - Ver produtos/categorias
+            3 - Falar com atendente
+            """
+        ),
+        ConversationStage.WaitingProduct => new BotReply(
+            conversation.Phone,
+            "Qual produto ou material você precisa?"
+        ),
+        ConversationStage.WaitingQuantity => new BotReply(
+            conversation.Phone,
+            "Qual a quantidade aproximada?"
+        ),
+        ConversationStage.WaitingFullName => new BotReply(
+            conversation.Phone,
+            "Informe seu nome completo."
+        ),
+        ConversationStage.WaitingRegisteredCustomerName => new BotReply(
+            conversation.Phone,
+            "Informe o nome completo do cadastro."
+        ),
+        ConversationStage.WaitingCustomerAddress => new BotReply(
+            conversation.Phone,
+            "Informe seu endereço completo."
+        ),
+        ConversationStage.WaitingCustomerPhone => new BotReply(
+            conversation.Phone,
+            "Informe seu telefone principal."
+        ),
+        ConversationStage.WaitingSecondPhone => new BotReply(
+            conversation.Phone,
+            "Informe um segundo telefone para contato."
+        ),
+        _ => new BotReply(conversation.Phone, "Por favor, envie sua resposta."),
+    };
 }
 
 static BotReply AskProduct(ConversationSession conversation)
@@ -964,6 +1048,8 @@ public record BotReply(string To, string Message);
 
 public record UpdateBudgetStatusRequest(string Status);
 
+public record UpdateAttendanceRequest(bool Attended);
+
 public class ConversationSession
 {
     public string Phone { get; set; } = string.Empty;
@@ -1052,4 +1138,7 @@ public enum ConversationStage
     ConfirmingCustomerPhone = 20,
     ConfirmingSecondPhone = 21,
     ConfirmingAudioChoice = 22,
+    ConfirmingFullName = 23,
+
+    Attended = 24,
 }
