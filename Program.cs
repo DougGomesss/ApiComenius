@@ -474,45 +474,6 @@ static BotReply ProcessMessage(
         {
             conversation.Product = conversation.PendingProduct;
             conversation.PendingProduct = null;
-            conversation.Stage = ConversationStage.WaitingQuantity;
-
-            return new BotReply(conversation.Phone, "Qual a quantidade aproximada?");
-        }
-
-        if (message == "2")
-        {
-            conversation.PendingProduct = null;
-            conversation.Stage = ConversationStage.WaitingProduct;
-
-            return new BotReply(
-                conversation.Phone,
-                "Tudo bem. Qual produto ou material você precisa?"
-            );
-        }
-
-        return new BotReply(
-            conversation.Phone,
-            "Opção inválida.\n\nEssa informação está correta?\n\n1 - Sim\n2 - Não"
-        );
-    }
-
-    if (conversation.Stage == ConversationStage.WaitingQuantity)
-    {
-        conversation.PendingQuantity = message;
-        conversation.Stage = ConversationStage.ConfirmingQuantity;
-
-        return new BotReply(
-            conversation.Phone,
-            $"Você digitou: *{message}*\n\nEssa informação está correta?\n\n1 - Sim\n2 - Não"
-        );
-    }
-
-    if (conversation.Stage == ConversationStage.ConfirmingQuantity)
-    {
-        if (message == "1")
-        {
-            conversation.Quantity = conversation.PendingQuantity;
-            conversation.PendingQuantity = null;
             conversation.Stage = ConversationStage.WaitingDeliveryType;
 
             return new BotReply(
@@ -528,10 +489,13 @@ static BotReply ProcessMessage(
 
         if (message == "2")
         {
-            conversation.PendingQuantity = null;
-            conversation.Stage = ConversationStage.WaitingQuantity;
+            conversation.PendingProduct = null;
+            conversation.Stage = ConversationStage.WaitingProduct;
 
-            return new BotReply(conversation.Phone, "Tudo bem. Qual a quantidade aproximada?");
+            return new BotReply(
+                conversation.Phone,
+                "Tudo bem. Qual produto ou material você precisa?"
+            );
         }
 
         return new BotReply(
@@ -836,8 +800,7 @@ static BotReply ProcessMessage(
 
                 Cliente: {budget.CustomerName}
                 Possui cadastro: {hasRegistrationText}
-                Produto: {budget.Product}
-                Quantidade: {budget.Quantity}
+                Lista de materiais: {budget.Product}
                 Tipo: {budget.DeliveryType}
                 Status: {budget.Status}
 
@@ -899,10 +862,6 @@ static BotReply AskCurrentStage(ConversationSession conversation)
             conversation.Phone,
             "Qual produto ou material você precisa?"
         ),
-        ConversationStage.WaitingQuantity => new BotReply(
-            conversation.Phone,
-            "Qual a quantidade aproximada?"
-        ),
         ConversationStage.WaitingFullName => new BotReply(
             conversation.Phone,
             "Informe seu nome completo."
@@ -931,7 +890,19 @@ static BotReply AskProduct(ConversationSession conversation)
 {
     conversation.Stage = ConversationStage.WaitingProduct;
 
-    return new BotReply(conversation.Phone, "Qual produto ou material você precisa?");
+    return new BotReply(
+        conversation.Phone,
+        """
+        Informe a lista de materiais com as quantidades.
+
+        Exemplo:
+        - 5 sacos de cimento
+        - 2m³ de areia
+        - 10 blocos
+
+        Envie tudo em uma única mensagem.
+        """
+    );
 }
 
 static BotReply ShowCategories(ConversationSession conversation)
@@ -1001,8 +972,8 @@ static BotReply AskContinueBudget(ConversationSession conversation)
         Resumo do orçamento:
 
         {customerInfo}
-        Produto: {conversation.Product}
-        Quantidade: {conversation.Quantity}
+        Lista de materiais:
+        {conversation.Product}
         {deliveryInfo}
 
         Deseja continuar com o orçamento?
@@ -1021,7 +992,7 @@ static Budget CreateBudget(ConversationSession conversation, string status)
         CustomerName = conversation.CustomerName ?? "Cliente não informado",
         Phone = conversation.Phone,
         Product = conversation.Product ?? "Não informado",
-        Quantity = conversation.Quantity ?? "Não informado",
+        Quantity = string.Empty,
         DeliveryType = conversation.DeliveryType ?? "Não informado",
         DeliveryAddress =
             conversation.HasRegistration == true ? null : conversation.CustomerAddress,
