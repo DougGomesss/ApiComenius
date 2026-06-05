@@ -622,9 +622,9 @@ static BotReply ProcessMessage(
         {
             conversation.CustomerName = conversation.PendingCustomerName;
             conversation.PendingCustomerName = null;
-            conversation.Stage = ConversationStage.AskingContinueBudget;
+            conversation.Stage = ConversationStage.WaitingCustomerAddress;
 
-            return AskContinueBudget(conversation);
+            return new BotReply(conversation.Phone, "Informe seu endereço registrado.");
         }
 
         if (message == "2")
@@ -697,8 +697,14 @@ static BotReply ProcessMessage(
         {
             conversation.CustomerAddress = conversation.PendingCustomerAddress;
             conversation.PendingCustomerAddress = null;
-            conversation.Stage = ConversationStage.WaitingCustomerPhone;
 
+            if (conversation.HasRegistration == true)
+            {
+                conversation.Stage = ConversationStage.AskingContinueBudget;
+                return AskContinueBudget(conversation);
+            }
+
+            conversation.Stage = ConversationStage.WaitingCustomerPhone;
             return new BotReply(conversation.Phone, "Informe seu telefone principal.");
         }
 
@@ -707,7 +713,11 @@ static BotReply ProcessMessage(
             conversation.PendingCustomerAddress = null;
             conversation.Stage = ConversationStage.WaitingCustomerAddress;
 
-            return new BotReply(conversation.Phone, "Tudo bem. Informe seu endereço completo.");
+            var addressPrompt = conversation.HasRegistration == true
+                ? "Tudo bem. Informe seu endereço registrado."
+                : "Tudo bem. Informe seu endereço completo.";
+
+            return new BotReply(conversation.Phone, addressPrompt);
         }
 
         return new BotReply(
