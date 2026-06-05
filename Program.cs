@@ -390,6 +390,15 @@ static BotReply ProcessMessage(
     if (conversation.Stage == ConversationStage.HumanSupport)
         return new BotReply(conversation.Phone, string.Empty);
 
+    var saoPauloZone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+    var nowSaoPaulo = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, saoPauloZone);
+
+    if (nowSaoPaulo.DayOfWeek == DayOfWeek.Sunday)
+        return new BotReply(
+            conversation.Phone,
+            "Não fazemos orçamentos no dia de domingo. Favor aguardar atendimento na segunda-feira."
+        );
+
     if (conversation.PendingAudioChoice)
     {
         if (message == "1")
