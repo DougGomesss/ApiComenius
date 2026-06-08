@@ -824,11 +824,6 @@ static BotReply ProcessMessage(
                 Status: {budget.Status}
 
                 Um atendente vai analisar e retornar em breve.
-
-                ---
-                Douglas Gomes
-                Desenvolvedor de software e automações
-                Técnico em eletrônica: 11980491930
                 """
             );
         }
@@ -846,11 +841,6 @@ static BotReply ProcessMessage(
                 Tudo bem. O orçamento foi cancelado.
 
                 Para realizar um novo orçamento, envie uma mensagem.
-
-                ---
-                Douglas Gomes
-                Desenvolvedor de software e automações
-                Técnico em eletrônica: 11980491930
                 """
             );
         }
