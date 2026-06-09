@@ -4,12 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>POC - Orçamentos WhatsApp</title>
-    <script type="module" crossorigin src="/assets/index-D_KrhMP0.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B2ZIZO9j.css">
+    <script type="module" crossorigin src="/assets/index-BCQeXBAq.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B8teW_n9.css">
   </head>
   <body>
     <div id="app">
       <header class="header">
+        <button id="chatButton" class="ghost-button">Chat</button>
         <button id="resetAllButton" class="danger-button">Limpar Orçamentos</button>
       </header>
 
@@ -22,6 +23,19 @@
           <div class="modal-actions">
             <button id="modalCancelButton" class="modal-cancel">Cancelar</button>
             <button id="modalConfirmButton" class="danger-button">Confirmar</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="chatPasswordModal" class="modal-overlay hidden">
+        <div class="modal-box">
+          <h3>Acesso ao Chat</h3>
+          <p>Digite a senha para acessar o chat:</p>
+          <input id="chatPasswordInput" type="password" placeholder="Senha" autocomplete="off" />
+          <p id="chatPasswordError" class="password-error hidden">Senha errada, digite a correta.</p>
+          <div class="modal-actions">
+            <button id="chatModalCancelButton" class="modal-cancel">Cancelar</button>
+            <button id="chatModalConfirmButton" class="ghost-button" style="opacity:1;cursor:pointer;">Entrar</button>
           </div>
         </div>
       </div>
@@ -63,6 +77,27 @@
           <div id="canceledList" class="budgets-list"></div>
         </section>
       </main>
+
+      <div id="chatPanel" class="chat-panel hidden">
+        <div class="chat-panel-header">
+          <span>Chat — Atendimento</span>
+          <button id="chatCloseButton" class="modal-cancel">Fechar</button>
+        </div>
+        <div class="chat-layout">
+          <div class="chat-sidebar">
+            <h3>Conversas</h3>
+            <div id="chatConversationList"></div>
+          </div>
+          <div class="chat-window">
+            <div id="chatHeader" class="chat-header">Selecione uma conversa</div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <div class="chat-input-area">
+              <input id="chatInput" type="text" placeholder="Digite sua mensagem..." autocomplete="off" />
+              <button id="chatSendButton">Enviar</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
   </body>
