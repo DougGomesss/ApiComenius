@@ -32,6 +32,7 @@ const string DEPOSIT_ADDRESS = "R. João Amós Comenius, 181 - Jardim São Berna
 const int MINIMUM_DELIVERY_DAYS = 2;
 
 var conversations = new ConcurrentDictionary<string, ConversationSession>();
+var chatHistory = new ConcurrentDictionary<string, List<ChatMessage>>();
 var budgets = new ConcurrentDictionary<Guid, Budget>();
 
 // Webhook real da Meta
@@ -142,6 +143,8 @@ app.MapPost(
             Console.WriteLine($"Mensagem recebida de {from}: {text}");
             Console.WriteLine($"Phone Number ID: {phoneNumberId}");
 
+            AddChatMessage(chatHistory, from, "client", text);
+
             var conversation = conversations.GetOrAdd(
                 from,
                 number => new ConversationSession
@@ -170,13 +173,18 @@ app.MapPost(
                 );
             }
 
+            conversation.PhoneNumberId = phoneNumberId;
+
             var reply = ProcessMessage(conversation, text, budgets);
 
             conversation.UpdatedAt = DateTime.UtcNow;
             conversations[from] = conversation;
 
             if (!string.IsNullOrEmpty(reply.Message))
+            {
+                AddChatMessage(chatHistory, from, "bot", reply.Message);
                 await SendWhatsAppTextAsync(httpClientFactory, phoneNumberId, from, reply.Message);
+            }
 
             return Results.Ok();
         }
@@ -247,6 +255,8 @@ app.MapPost(
         var phone = OnlyNumbers(request.From);
         var message = request.Body.Trim();
 
+        AddChatMessage(chatHistory, phone, "client", message);
+
         if (request.Type == "audio")
         {
             var session = conversations.GetOrAdd(
@@ -271,6 +281,7 @@ app.MapPost(
             2 - Digitar sua resposta
             """;
 
+            AddChatMessage(chatHistory, phone, "bot", replyText);
             return Results.Ok(new BotReply(phone, replyText));
         }
 
@@ -307,10 +318,13 @@ app.MapPost(
         conversation.UpdatedAt = DateTime.UtcNow;
         conversations[phone] = conversation;
 
-        if (string.IsNullOrEmpty(reply.Message))
-            return Results.Ok();
+        if (!string.IsNullOrEmpty(reply.Message))
+        {
+            AddChatMessage(chatHistory, phone, "bot", reply.Message);
+            return Results.Ok(reply);
+        }
 
-        return Results.Ok(reply);
+        return Results.Ok();
     }
 );
 
@@ -327,6 +341,38 @@ app.MapGet(
     () =>
     {
         return Results.Ok(conversations.Values.OrderByDescending(x => x.UpdatedAt).ToList());
+    }
+);
+
+app.MapGet(
+    "/conversations/{phone}/messages",
+    (string phone) =>
+    {
+        var normalized = OnlyNumbers(phone);
+        if (chatHistory.TryGetValue(normalized, out var messages))
+            return Results.Ok(messages.OrderBy(m => m.SentAt).ToList());
+
+        return Results.Ok(new List<ChatMessage>());
+    }
+);
+
+app.MapPost(
+    "/conversations/{phone}/send",
+    async (string phone, SendChatMessageRequest request, IHttpClientFactory httpClientFactory) =>
+    {
+        var normalized = OnlyNumbers(phone);
+
+        if (string.IsNullOrWhiteSpace(request.Message))
+            return Results.BadRequest("A mensagem não pode estar vazia.");
+
+        AddChatMessage(chatHistory, normalized, "attendant", request.Message.Trim());
+
+        if (!conversations.TryGetValue(normalized, out var conv) || string.IsNullOrEmpty(conv.PhoneNumberId))
+            return Results.BadRequest("Conversa não encontrada ou phoneNumberId ausente.");
+
+        await SendWhatsAppTextAsync(httpClientFactory, conv.PhoneNumberId, normalized, request.Message.Trim());
+
+        return Results.Ok();
     }
 );
 
@@ -381,6 +427,26 @@ app.MapPost(
 );
 app.MapFallbackToFile("index.html");
 app.Run("http://0.0.0.0:5080");
+
+static void AddChatMessage(
+    ConcurrentDictionary<string, List<ChatMessage>> history,
+    string phone,
+    string from,
+    string text
+)
+{
+    var list = history.GetOrAdd(phone, _ => new List<ChatMessage>());
+    lock (list)
+    {
+        list.Add(new ChatMessage
+        {
+            From = from,
+            Text = text,
+            SentAt = DateTime.UtcNow
+        });
+    }
+}
+
 static BotReply ProcessMessage(
     ConversationSession conversation,
     string message,
@@ -1040,9 +1106,19 @@ public record UpdateBudgetStatusRequest(string Status);
 
 public record UpdateAttendanceRequest(bool Attended);
 
+public record SendChatMessageRequest(string Message);
+
+public class ChatMessage
+{
+    public string From { get; set; } = string.Empty; // "bot", "client", "attendant"
+    public string Text { get; set; } = string.Empty;
+    public DateTime SentAt { get; set; }
+}
+
 public class ConversationSession
 {
     public string Phone { get; set; } = string.Empty;
+    public string? PhoneNumberId { get; set; }
     public ConversationStage Stage { get; set; }
 
     public string? Product { get; set; }
