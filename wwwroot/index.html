@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>POC - Orçamentos WhatsApp</title>
-    <script type="module" crossorigin src="/assets/index-BCQeXBAq.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B8teW_n9.css">
+    <script type="module" crossorigin src="/assets/index-CvIwJR8u.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CE8K-Epl.css">
   </head>
   <body>
     <div id="app">
@@ -78,22 +78,24 @@
         </section>
       </main>
 
-      <div id="chatPanel" class="chat-panel hidden">
-        <div class="chat-panel-header">
-          <span>Chat — Atendimento</span>
-          <button id="chatCloseButton" class="modal-cancel">Fechar</button>
-        </div>
-        <div class="chat-layout">
-          <div class="chat-sidebar">
-            <h3>Conversas</h3>
-            <div id="chatConversationList"></div>
+      <div id="chatModal" class="modal-overlay hidden">
+        <div class="chat-modal-box">
+          <div class="chat-modal-header">
+            <span>Chat — Atendimento</span>
+            <button id="chatCloseButton" class="modal-cancel">✕</button>
           </div>
-          <div class="chat-window">
-            <div id="chatHeader" class="chat-header">Selecione uma conversa</div>
-            <div id="chatMessages" class="chat-messages"></div>
-            <div class="chat-input-area">
-              <input id="chatInput" type="text" placeholder="Digite sua mensagem..." autocomplete="off" />
-              <button id="chatSendButton">Enviar</button>
+          <div class="chat-layout">
+            <div class="chat-sidebar">
+              <h3>Conversas</h3>
+              <div id="chatConversationList"></div>
+            </div>
+            <div class="chat-window">
+              <div id="chatHeader" class="chat-header">Selecione uma conversa</div>
+              <div id="chatMessages" class="chat-messages"></div>
+              <div class="chat-input-area">
+                <input id="chatInput" type="text" placeholder="Digite sua mensagem..." autocomplete="off" />
+                <button id="chatSendButton">Enviar</button>
+              </div>
             </div>
           </div>
         </div>
