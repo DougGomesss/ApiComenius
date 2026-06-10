@@ -85,6 +85,28 @@ app.MapPost(
             if (messageType == "audio")
             {
                 var fromAudio = OnlyNumbers(message.GetProperty("from").GetString() ?? "");
+                
+                var existingSession = conversations.GetOrAdd(
+                    fromAudio,
+                    number => new ConversationSession { Phone = number, Stage = ConversationStage.Started, UpdatedAt = DateTime.UtcNow }
+                );
+
+                var isPostFlow =
+                    existingSession.Stage == ConversationStage.HumanSupport ||
+                    existingSession.Stage == ConversationStage.Finished;
+
+                if (isPostFlow)
+                {
+                    // Baixar e salvar o áudio para exibir no chat
+                    var mediaId = message.GetProperty("audio").GetProperty("id").GetString();
+                    var savedPath = await DownloadWhatsAppMediaAsync(httpClientFactory, mediaId!);
+
+                    if (savedPath != null)
+                        AddChatMessage(chatHistory, fromAudio, "audio", savedPath);
+
+                    return Results.Ok();
+                }
+
                 var phoneNumberIdAudio = value
                     .GetProperty("metadata")
                     .GetProperty("phone_number_id")
@@ -197,6 +219,43 @@ app.MapPost(
         }
     }
 );
+
+static async Task<string?> DownloadWhatsAppMediaAsync(
+    IHttpClientFactory httpClientFactory,
+    string mediaId
+)
+{
+    var token = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN");
+    if (string.IsNullOrWhiteSpace(token)) return null;
+
+    var client = httpClientFactory.CreateClient();
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+    var metaResponse = await client.GetAsync(
+        $"https://graph.facebook.com/v21.0/{mediaId}"
+    );
+
+    if (!metaResponse.IsSuccessStatusCode) return null;
+
+    var metaJson = await metaResponse.Content.ReadAsStringAsync();
+    using var doc = JsonDocument.Parse(metaJson);
+    var mediaUrl = doc.RootElement.GetProperty("url").GetString();
+    if (string.IsNullOrWhiteSpace(mediaUrl)) return null;
+
+    var audioResponse = await client.GetAsync(mediaUrl);
+    if (!audioResponse.IsSuccessStatusCode) return null;
+
+    var audioDir = Path.Combine(AppContext.BaseDirectory, "audio");
+    Directory.CreateDirectory(audioDir);
+
+    var fileName = $"{mediaId}.ogg";
+    var filePath = Path.Combine(audioDir, fileName);
+
+    await using var fs = File.Create(filePath);
+    await audioResponse.Content.CopyToAsync(fs);
+
+    return fileName;
+}
 
 static async Task SendWhatsAppTextAsync(
     IHttpClientFactory httpClientFactory,
@@ -425,6 +484,18 @@ app.MapPost(
         return Results.Ok("Conversas e orçamentos apagados.");
     }
 );
+
+app.MapGet("/audio/{fileName}", (string fileName) =>
+{
+    var audioDir = Path.Combine(AppContext.BaseDirectory, "audio");
+    var filePath = Path.Combine(audioDir, fileName);
+
+    if (!File.Exists(filePath))
+        return Results.NotFound();
+
+    return Results.File(filePath, "audio/ogg");
+});
+
 app.MapFallbackToFile("index.html");
 app.Run("http://0.0.0.0:5080");
 
@@ -516,7 +587,7 @@ static BotReply ProcessMessage(
         {
             "1" => AskProduct(conversation),
             "2" => ShowCategories(conversation),
-            "3" => SendToHuman(conversation),
+            "3" => AskHumanName(conversation),
             _ => new BotReply(
                 conversation.Phone,
                 """
@@ -708,6 +779,12 @@ static BotReply ProcessMessage(
             conversation.Phone,
             "Opção inválida.\n\nEssa informação está correta?\n\n1 - Sim\n2 - Não"
         );
+    }
+
+    if (conversation.Stage == ConversationStage.WaitingHumanName)
+    {
+        conversation.CustomerName = message.Trim();
+        return SendToHuman(conversation);
     }
 
     if (conversation.Stage == ConversationStage.WaitingFullName)
@@ -967,8 +1044,22 @@ static BotReply AskCurrentStage(ConversationSession conversation)
             conversation.Phone,
             "Informe um segundo telefone para contato."
         ),
+        ConversationStage.WaitingHumanName => new BotReply(
+            conversation.Phone,
+            "Para encaminhar seu atendimento, informe seu nome completo."
+        ),
         _ => new BotReply(conversation.Phone, "Por favor, envie sua resposta."),
     };
+}
+
+static BotReply AskHumanName(ConversationSession conversation)
+{
+    conversation.Stage = ConversationStage.WaitingHumanName;
+
+    return new BotReply(
+        conversation.Phone,
+        "Para encaminhar seu atendimento, informe seu nome completo."
+    );
 }
 
 static BotReply AskProduct(ConversationSession conversation)
@@ -1207,4 +1298,5 @@ public enum ConversationStage
     ConfirmingFullName = 23,
 
     Attended = 24,
+    WaitingHumanName = 25,
 }
