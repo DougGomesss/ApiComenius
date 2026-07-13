@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Deposito.Orcamentos.Poc.Api.Enums;
+using Deposito.Orcamentos.Poc.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -1189,114 +1191,3 @@ static string OnlyNumbers(string value)
     return new string(value.Where(char.IsDigit).ToArray());
 }
 
-public record IncomingMessage(string From, string Body, string? Type = "text");
-
-public record BotReply(string To, string Message);
-
-public record UpdateBudgetStatusRequest(string Status);
-
-public record UpdateAttendanceRequest(bool Attended);
-
-public record SendChatMessageRequest(string Message);
-
-public class ChatMessage
-{
-    public string From { get; set; } = string.Empty; // "bot", "client", "attendant"
-    public string Text { get; set; } = string.Empty;
-    public DateTime SentAt { get; set; }
-}
-
-public class ConversationSession
-{
-    public string Phone { get; set; } = string.Empty;
-    public string? PhoneNumberId { get; set; }
-    public ConversationStage Stage { get; set; }
-
-    public string? Product { get; set; }
-    public string? Quantity { get; set; }
-
-    public string? DeliveryType { get; set; }
-    public string? DeliveryAddress { get; set; }
-    public int? MinimumDeliveryDays { get; set; }
-
-    public bool? HasRegistration { get; set; }
-
-    public string? CustomerName { get; set; }
-    public string? CustomerAddress { get; set; }
-    public string? CustomerPhone { get; set; }
-    public string? SecondPhone { get; set; }
-
-    public string? PendingProduct { get; set; }
-    public string? PendingQuantity { get; set; }
-    public string? PendingCustomerName { get; set; }
-    public string? PendingCustomerAddress { get; set; }
-    public string? PendingCustomerPhone { get; set; }
-    public string? PendingSecondPhone { get; set; }
-    public bool PendingAudioChoice { get; set; }
-
-    public DateTime UpdatedAt { get; set; }
-}
-
-public class Budget
-{
-    public Guid Id { get; set; }
-
-    public string CustomerName { get; set; } = string.Empty;
-    public string Phone { get; set; } = string.Empty;
-
-    public string Product { get; set; } = string.Empty;
-    public string Quantity { get; set; } = string.Empty;
-
-    public string DeliveryType { get; set; } = string.Empty;
-    public string? DeliveryAddress { get; set; }
-    public string? DepositAddress { get; set; }
-    public int? MinimumDeliveryDays { get; set; }
-
-    public bool HasRegistration { get; set; }
-
-    public string? CustomerAddress { get; set; }
-    public string? CustomerPhone { get; set; }
-    public string? SecondPhone { get; set; }
-
-    public string Status { get; set; } = "Pendente";
-
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-}
-
-public enum ConversationStage
-{
-    Started = 0,
-    MenuSent = 1,
-
-    WaitingProduct = 2,
-    WaitingQuantity = 3,
-    WaitingDeliveryType = 4,
-
-    AskingHasRegistration = 6,
-
-    WaitingRegisteredCustomerName = 7,
-
-    WaitingFullName = 8,
-    WaitingCustomerAddress = 9,
-    WaitingCustomerPhone = 10,
-    WaitingSecondPhone = 11,
-
-    AskingContinueBudget = 12,
-
-    HumanSupport = 13,
-    Finished = 14,
-    Canceled = 15,
-
-    ConfirmingProduct = 16,
-    ConfirmingQuantity = 17,
-    ConfirmingCustomerName = 18,
-    ConfirmingCustomerAddress = 19,
-    ConfirmingCustomerPhone = 20,
-    ConfirmingSecondPhone = 21,
-    ConfirmingAudioChoice = 22,
-    ConfirmingFullName = 23,
-
-    Attended = 24,
-    WaitingHumanName = 25,
-}
