@@ -32,6 +32,16 @@ app.UseStaticFiles();
 const string VERIFY_TOKEN = "deposito-poc-123";
 const string DEPOSIT_ADDRESS = "R. João Amós Comenius, 181 - Jardim São Bernardo, São Paulo - SP, 04844-420";
 const int MINIMUM_DELIVERY_DAYS = 2;
+const string DEV_PHONE_BLOCK = "5511944433936";
+
+const string DEV_PROMO_MESSAGE = """
+🤖 Gostou do atendimento automático?
+
+Sua loja também pode ter um assistente como este, atendendo seus clientes 24h por dia!
+
+📲 Fale comigo: wa.me/5511980491930
+Douglas — Desenvolvedor de Software e Automações
+""";
 
 var conversations = new ConcurrentDictionary<string, ConversationSession>();
 var chatHistory = new ConcurrentDictionary<string, List<ChatMessage>>();
@@ -210,6 +220,13 @@ app.MapPost(
                 await SendWhatsAppTextAsync(httpClientFactory, phoneNumberId, from, reply.Message);
             }
 
+            // Divulgação: só ao finalizar orçamento ou ao encaminhar para atendente
+            if (conversation.Stage == ConversationStage.Finished
+                || conversation.Stage == ConversationStage.HumanSupport)
+            {
+                await SendDevPromoAsync(httpClientFactory, phoneNumberId, from);
+            }
+
             return Results.Ok();
         }
         catch (Exception ex)
@@ -301,6 +318,18 @@ static async Task SendWhatsAppTextAsync(
     Console.WriteLine("=== RESPOSTA ENVIO WHATSAPP ===");
     Console.WriteLine(response.StatusCode);
     Console.WriteLine(responseBody);
+}
+
+static async Task SendDevPromoAsync(
+    IHttpClientFactory httpClientFactory,
+    string phoneNumberId,
+    string to
+)
+{
+    if (to == DEV_PHONE_BLOCK)
+        return;
+
+    await SendWhatsAppTextAsync(httpClientFactory, phoneNumberId, to, DEV_PROMO_MESSAGE);
 }
 
 app.MapPost(
@@ -1190,4 +1219,3 @@ static string OnlyNumbers(string value)
 {
     return new string(value.Where(char.IsDigit).ToArray());
 }
-
